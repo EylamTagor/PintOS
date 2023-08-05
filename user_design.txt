@@ -1,0 +1,296 @@
+                     +--------------------------+
+                     |           CS 439         |
+                     | PROJECT 2: USER PROGRAMS |
+                     |      DESIGN DOCUMENT     |
+                     +--------------------------+
+
+
+For this design document, please *each* submit the header, but you do not need
+to fill out the questions.  We will cover all questions (in content, if not in
+form) in the interview.
+
+When you have completed the header, submit it to the Canvas assignment
+Project 2 Design and Documentation.  ***Your submission must be a text file and
+each line must not extend past 80 characters.  (Note that rtf files are NOT text
+files.)
+
+
+---- Name ----
+
+>> Fill your name, UT EID, CS login, email address, and unique number:
+
+Name:
+EID:
+CS login:
+Email:
+Unique Number:
+
+Slip days used on this project:
+
+
+---- GROUP ----
+
+>> Fill the names, UT EIDs, CS logins, email addresses, and unique numbers
+>> of your group members.  Also fill in each person's ranking on the 
+>> partner evaluation scale, as determined by you.
+
+Name1: Praveen Mogan
+EID1: pm32757
+CS login: pmogan77
+Email: pmogan77@gmail.com
+Unique Number: 52750
+
+Name2: Sashank Meka
+EID2: sm76742 
+CS login: sashankm
+Email: sashankmeka7@gmail.com
+Unique Number: 52765
+
+Name3: Ike Chen
+EID3: ic8842
+CS login: ikechen
+Email: hesitantray2@gmail.com
+Unique Number: 52760
+
+---- PRELIMINARIES ----
+
+
+>> If you have any preliminary comments on your submission, notes for the
+>> TAs, or extra credit, please give them here.
+N/A
+
+>> Please cite any offline or online sources you consulted while
+>> preparing your submission, other than the Pintos documentation, course
+>> text, lecture notes, and course staff.
+N/A
+
+
+                           ARGUMENT PASSING
+                           ================
+
+
+---- DATA STRUCTURES ----
+
+
+>> A1: Copy here the declaration of each new or changed `struct' or
+>> `struct' member, global or static variable, `typedef', ‘#define’, or
+>> enumeration that was necessary to implement argument passing.  
+>> Identify the purpose of each in 25 words or less.
+
+N/A
+
+---- ALGORITHMS ----
+
+
+>> A2: Briefly describe how you implemented argument parsing.  How do
+>> you arrange for the elements of argv[] to be in the right order?
+>> How do you avoid overflowing the stack page?  Is it enough to limit
+>> the size of the incoming commandline?  Why or Why not?
+We use strtok_r to get the arguments in order of left to right. However, when we
+add to the stack, we add from right to left. We avoid overflowing the stack page
+by checking the value of esp or any other temp esp pointer on each decrement. 
+By checking, we mean that the pointer is above 0, below phys_base, and in user 
+address space. It is not enough to limit incoming commandline size because the 
+esp pointer could decrement to an invalid space, if the stack is near capacity.
+
+
+---- RATIONALE ----
+
+
+>> A3: Why does Pintos implement strtok_r() but not strtok()?
+strtok_r() is thread safe whereas strtok() is not. This is because strtok_r() 
+takes in another argument to store state between calls instead of using a global
+variable.
+
+>> A4: In Pintos, the kernel separates commands into an executable name
+>> and arguments.  In Unix-like systems, the shell does this
+>> separation.  Identify at least two advantages of the Unix approach.
+It allows the kernel to be more portable as a different parsing algorithm could 
+be implemented by the shell, then pass the arguments into the kernel.
+
+It reduces the size of kernel code, which is generally wanted to be kept 
+light-weight, minimizing overhead.
+
+                             SYSTEM CALLS
+                             ============
+
+
+---- DATA STRUCTURES ----
+
+
+>> B1: Copy here the declaration of each new or changed `struct' or
+>> `struct' member, global or static variable, `typedef', ‘#define’, or
+>> enumeration.  Identify the purpose of each in 25 words or less.
+
+**thread.h**
+struct list_elem child_elem;
+struct list children;
+
+int exit_status;
+struct semaphore sema_wait;
+struct semaphore sema_exec;
+bool exec_success;
+struct file* file_arr[128];
+
+Used to store program exit status + validity as well as a semaphore to create 
+synchronization around process waiting and exiting. Child list and list_elem 
+are used to keep track of a process's children for waiting/exiting.
+
+**syscall.c**
+struct lock filesys;
+Used to provide synchronization around file system calls.
+
+>> B2: Describe how file descriptors are associated with open files.
+>> Are file descriptors unique within the entire OS or just within a
+>> single process?
+File descriptors are unique just within a process. However, 0 and 1 are known to
+be stdin and stdout, respectively, which are known to every process. A file 
+descriptor is given to a file every time open is called on a filename, assigning
+the file a unique file descriptor for the process. The index in the array is the
+file descriptor and the file is the value at the pointer at the index.
+
+
+---- ALGORITHMS ----
+
+
+>> B3: Describe your code for accessing user data in the
+>> kernel.
+We take the esp pointer and increment the pointer by one each time to access
+a different user data on the stack. Specifically, when syscall handler is called
+esp points to the system call number. Each pointer above the number refers to 
+a different argument passed by the user code. To access this data, we first 
+ensure that it is between the bounds of 0 and phys_base. Then, we check that 
+the address is accessible by the user process by referencing it against the page
+table. Finally, we derefence the pointer to get the user data.
+
+>> B4: Suppose a system call causes a full page (4,096 bytes) of data
+>> to be copied from user space into the kernel.  Based on your code, 
+>> what is the least and the greatest possible number of inspections of 
+>> the page table (e.g. calls to pagedir_get_page()) that might result?  
+>> What about for a system call that only copies 2 bytes of data?  Is there 
+>> room for improvement in these numbers, and how much?
+Both conditions only call pagedir_get_page twice at most and 0 times at least. 
+The zero case occurs when the first pointer passed in is not within bounds of 0
+and phys_base. This casuses the pointer checking code to short circuit and call
+exit(-1). This would also prevent any subsequent pointers from being checked. 
+Only 2 calls are made in the most case, because the first and last pointers are
+the only one that needs to be checked in a contiguous data segment. We do not 
+currently see room for improvement here.
+
+
+>> B5: Any access to user program memory at a user-specified address
+>> can fail due to a bad pointer value.  Such accesses must cause the
+>> process to be terminated.  System calls are fraught with such
+>> accesses, e.g. a "write" system call requires reading the system
+>> call number from the user stack, then each of the call's three
+>> arguments, then an arbitrary amount of user memory, and any of
+>> these can fail at any point.  This poses a design and
+>> error-handling problem: how do you best avoid obscuring the primary
+>> function of code in a morass of error-handling?  Furthermore, when
+>> an error is detected, how do you ensure that all temporarily
+>> allocated resources (locks, buffers, etc.) are freed?  In a few
+>> sentences, describe the strategy or strategies you adopted for
+>> managing these issues.  Give an example.
+We check that each user provided pointer is between 0 and phys_base. We also 
+ensure that each pointer points to a valid memory slot for that process by 
+referencing it against the process's page table. If any of these conditions 
+fail, we exit(-1). This eventually calls process_exit() where we handle freeing
+memory. First, we did not create any dynamic data structures on top of the 
+existing codebase. This prevented us from needing to explictly add free commands
+for new data structures. 
+
+
+---- SYNCHRONIZATION ----
+
+
+>> B6: Briefly describe your implementation of the "wait" system call
+>> and how it interacts with process termination.
+We created a child list in the parent, adding children to it whenever created.
+Then, we iterate through the child list in process_wait, picking the child with
+the correct TID. We remove the child from the child list and sema_down on
+sema_wait; we sema_up in process_exit, after which the parent can collect the
+exit status. The child sema_down on parent_pickedup, which the parent sema_up
+after the exit status is collected.
+
+>> B7: Consider parent process P with child process C.  Explain how
+>> how your code ensures synchronization and avoids race conditions
+>> in each of the following cases:
+>> a) when P calls wait(C) before C exits?  
+>> b) when P calls wait(C) after C exits?  
+>> c) when P terminates without waiting before C exits?  
+>> d) when P terminates without waiting after C exits?  
+>> e) Are there any special cases?
+A. P calls sema_down on sema_wait, which is only sema_up in C's process_exit.
+Therefore, P will never try to collect exit status before C's resources are
+destroyed.
+B. C always calls sema_up on sema_wait before it dies, then calls sema_down
+on parent_pickedup. P only sema_up on parent_pickedup in process_wait or when
+it dies, so C's resources can never be freed before P collects the exit status.
+C. When P terminates, it calls sema_up on parent_pickedup, so C is able to die
+without waiting for P to collect exit status.
+D. When C terminates, it sema_down on parent_pickedup, so although the thread
+is technically dead, its resources haven't been destroyed until P exits and
+sema_up on parent_pickedup.
+E. We don't know of any special cases, but we're pretty confident in our
+synchronisation; the only way for a thread to die is for either its parent to
+die or its parent to reap its resources.
+
+>> B8: The "exec" system call returns -1 if loading the new executable
+>> fails, so it cannot return before the new executable has completed
+>> loading.  How does your code ensure this?  How is the load
+>> success/failure status passed back to the thread that calls "exec"?
+We ensure this by sema_down on sema_exec when the parent calls process_execute
+and sema_up when the child dies. The child automatically dies if the executable
+can't load. Therefore, the parent can't prematurely report success until the
+child can confirm it by dying.
+
+---- RATIONALE ----
+
+
+>> B9: What advantages or disadvantages can you see to your design
+>> for file descriptors?
+The main advantage is that a process can't continously open an unlimited number
+of files, as there is a hard limit at 128. Furthermore, an array is used to 
+store the file descriptors, providing O(1) conversion between descriptor and 
+the file.
+
+A drawback of this approach is that getting a new file descriptor would be O(n)
+as we would have to iterate through the array to find a null element. Another 
+disadvantage is that processes will not be able to open 129 or more files at a 
+time, if needed.
+
+
+>> B10: The default tid_t to pid_t mapping is the identity mapping.
+>> If you changed it, what advantages are there to your approach?
+We did not change this.
+
+
+                           SURVEY QUESTIONS
+                           ================
+
+
+Answering these questions is optional, but it will help us improve the
+course in future semesters.  Feel free to tell us anything you
+want--these questions are just to spur your thoughts.  You may also
+choose to respond anonymously in the course evaluations at the end of
+the semester.
+
+
+>> In your opinion, was this assignment, or any one of the three problems
+>> in it, too easy or too hard?  Did it take too long or too little time?
+
+
+>> Did you find that working on a particular part of the assignment gave
+>> you greater insight into some aspect of OS design?
+
+
+>> Is there some particular fact or hint we should give students in
+>> future semesters to help them solve the problems?  Conversely, did you
+>> find any of our guidance to be misleading?
+
+
+>> Do you have any suggestions for the TAs to more effectively assist
+>> students, either for future semesters or the remaining projects?
+
+
+>> Any other comments?

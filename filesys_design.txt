@@ -1,0 +1,337 @@
+                    +-------------------------+
+|           CS 439        |
+| PROJECT 4: FILE SYSTEMS |
+|      DESIGN DOCUMENT    |
++-------------------------+
+
+
+The questions in this design document should reflect the design of the code
+you 
+wrote for the project.   Your grade will reflect both the quality of your 
+answer in this document and the quality of the design implementation in your 
+code.  You may receive partial credit for answering questions for parts of 
+the project that you did not get to implement, but you must indicate in your 
+answer that there is no corresponding implementation, or you will not receive 
+any credit.
+
+
+For each question, you should include both the name of the file(s), function 
+name(s), and the line numbers where the relevant code may be found.
+
+
+These design documents will be completed and submitted as a group.  Please use 
+this document as a guide for design and discuss the questions and their 
+potential answers prior to beginning implementation.
+
+
+When you have completed your design document, submit it to the Canvas 
+assignment Project 4 Design and Documentation.   
+
+
+***Your submission must be a text file and each line must not extend past 80 
+characters.  In addition, your submission must contain all of the original 
+material and not exceed 18,000 characters.  The character count will be 
+measured using the Linux command wc.  (Note that rtf files are NOT text
+files.)
+
+
+---- Team Information  ----
+
+
+>> Fill your names, UT EIDs, CS logins, email addresses, and unique numbers:
+
+
+Name: Praveen Mogan, Sashank Meka, Eylam Tagor
+EID: pm32757, sm76742, et23634
+CS login: pmogan77, sashankm, eylam
+Email: pmogan77@gmail.com, sashankmeka7@gmail.com, eylamtagor@gmail.com
+
+
+Slip days used on this project: 0
+
+
+
+
+
+
+
+
+---- PRELIMINARIES ----
+
+
+>> If you have any preliminary comments on your submission or notes for the
+>> TAs, give them here.
+
+
+>> Please cite any offline or online sources you consulted while
+>> preparing your submission, other than the Pintos documentation, course
+>> text, lecture notes, and course staff.
+
+
+
+
+INDEXED AND EXTENSIBLE FILES
+============================
+
+
+---- DATA STRUCTURES ----
+
+
+>> A1: Copy here the declaration of each new or changed `struct' or
+>> `struct' member, global or static variable, `typedef', ‘#define’, or
+>> enumeration that was necessary for your indexed and extensible file
+>> implementation.  Identify the purpose of each in 25 words or less.
+
+struct inode_disk
+{
+
+block_sector_t direct[122];
+block_sector_t indirect;
+block_sector_t doubly_indirect;
+off_t length;                       /* File size in bytes. */
+unsigned magic;                     /* Magic number. */
+bool isDir;                        /* True if file, false if directory */
+block_sector_t parent;              /* Parent directory */
+};
+
+The direct array is used to store the direct pointers to the data blocks. 
+The indirect pointer is used to store the pointer to the indirect block. 
+The doubly_indirect pointer is used to store the pointer to the doubly 
+indirect block. The length is used to store the length of the file. 
+The magic number is used to check if the inode is valid. The isDir 
+boolean is used to check if the inode is a directory or a file. 
+The parent pointer is used to store the pointer to the parent 
+directory.
+
+
+struct inode 
+{
+struct lock extend_lock;            /* Lock for extending file */
+};
+
+The extend_lock is used to lock the inode when extending the file. 
+This is to prevent multiple threads from extending the file at the 
+same time.
+
+bool filesys_create (const char *name, off_t initial_size, bool isDir);
+
+The isDir boolean was added to track whether the file is a directory 
+or a file.
+
+filesys.h: 16
+inode.c: 20-37, 48-58
+
+>> A2: What is the maximum size of a file supported by your inode
+>> structure?  Show your work.
+Assume 512 bytes -> each pointer is 4 bytes -> 128 pointers per block
+
+512 bytes - 4 (indirect) - 4 (doubly_indirect) - 4 (length) - 
+4 (magic) - 4 (parent) - 4 (isDir) = 488 bytes = 122 block_sector_t's 
+for direct blocks
+
+Total File size we can store is 512*122 (direct) + 512*128 
+(indirect) + 512*128*128 (double indirect) = 2^23 bytes 
+-> 8516608 bytes
+
+inode.c: 20-37
+
+---- SYNCHRONIZATION ----
+
+
+>> A3: Explain how your code avoids a race if two processes attempt to
+>> extend a file at the same time.
+We use a lock to prevent multiple threads from extending the file at 
+the same time. The lock is acquired before the file is extended and 
+released after the file is extended. This prevents multiple threads 
+from extending the file at the same time. More specifically, this 
+lock belongs to the inode and is used when the file is being 
+extended at inode_write_at. It is also important to atomically 
+update the size of the file.
+
+inode.c: 505-525 (inode_write_at)
+
+>> A4: Suppose processes A and B both have file F open, both
+>> positioned at end-of-file.  If A reads and B writes F at the same
+>> time, A may read all, part, or none of what B writes.  However, A
+>> may not read data other than what B writes, e.g. if B writes
+>> nonzero data, A is not allowed to see all zeros.  Explain how your
+>> code avoids this race.
+
+Since every update to the file size is atomic, the file size will 
+be updated before the data is written to the file. This means that 
+if process A reads the file, it will read the data that was written
+by process B. If process A reads the file before process B writes
+to the file, it will read the data that was previously in the file.
+
+inode.c: 505-525 (inode_write_at)
+
+>> A5: Explain how your synchronization design provides "fairness".
+>> File access is "fair" if readers cannot indefinitely block writers
+>> or vice versa.  That is, one or many processes reading from a file
+>> cannot forever prevent another process from writing to the file, and
+>> one or many processes writing to a file cannot forever prevent
+>> another process from reading the file.
+
+Since readers and writers both attempt to acquire the lock when needed, 
+fairness is provided by the thread scheduler, so each process will
+eventually get the lock. Once a process releases a lock, it must
+go to the end of the queue before reqacquiring, allowing other
+processes to get the lock. As readers/writers have the same priority, 
+unfairness is mitigated as well.
+
+inode.c: 505-525 (inode_write_at)
+
+
+---- RATIONALE ----
+
+
+>> A6: Is your file layout a multilevel indexed structure?  If so, why
+>> did you choose this particular combination of direct, indirect, and
+>> doubly indirect blocks?  If not, why did you choose an alternative
+>> file structure, and what advantages and disadvantages does your
+>> structure have, compared to a multilevel index?
+>> In your explanation, include at least two reasons to support your 
+>> choices.
+
+Our file layout is multilevel indexed. We chose to first start with 
+one indirect block and one doubly indirect block. We then added a 
+few other variables into the struct such as length, magic, isDir, 
+and parent block. As the block needed to exactly BLOCK_SECTOR_SIZE
+long, we then calculated how many direct blocks we would need (122).
+Afterwards, we ensured that the inode could store up to the max size 
+requested. If not, we would have added a third indirection block 
+while cutting one of the direct blocks. We chose this structure because a 
+multilevel index removes external fragmentation caused by contiguous
+allocation, as the blocks do not need to be contiguous. 
+Another advantage is that very small files can be directly 
+stored in the inode through the direct blocks.
+
+inode.c 20-37
+
+SUBDIRECTORIES
+==============
+
+
+---- DATA STRUCTURES ----
+
+
+>> B1: Copy here the declaration of each new or changed `struct' or
+>> `struct' member, global or static variable, `typedef', ‘#define’, or
+>> enumeration that was necessary for your subdirectory 
+>> implementation.  Identify the purpose of each in 25 words or less.
+
+struct thread
+{
+struct dir *cur_dir;
+};
+
+The cur_dir is used to store the current directory of the thread. This is used
+to keep track of the current directory of the thread.
+
+thread.h: 86
+
+---- ALGORITHMS ----
+
+
+>> B2: Describe your code for traversing a user-specified path.  How
+>> do traversals of absolute and relative paths differ?
+
+We currently do not traverse user specified paths. However, if we were to
+traverse user specified paths, we would use the following algorithm:
+1. If the path is absolute, we would start at the root directory.
+2. If the path is relative, we would start at the current directory.
+3. We would then split the path into tokens using the '/' character as a
+delimiter.
+4. We would then iterate through the tokens and check if the token is a
+directory.
+5. If the token is a directory, we would then check if the directory exists.
+7. If a .. is encountered, we would go up a directory.
+8. If a . is encountered, we would simply move to the next token.
+9. Repeat until all tokens have been processed.
+
+
+---- SYNCHRONIZATION ----
+
+
+>> B3: How do you prevent races on directory entries?  For example,
+>> only one of two simultaneous attempts to remove a single file
+>> should succeed, as should only one of two simultaneous attempts to
+>> create a file with the same name, and so on.
+
+We currently do not implement this. However, if we were to implement this, we
+would use the following algorithm:
+1. We would use a lock for the filesystem in filesys.c
+2. We would then lock the filesystem before performing any operations on the
+filesystem.
+3. We would then unlock the filesystem after performing the operations on the
+filesystem.
+
+This would prevent simultaneous requests on a file from happening at the same
+time.
+
+
+>> B4: Does your implementation allow a directory to be removed if it
+>> is open by a process or if it is in use as a process's current
+>> working directory?  If so, what happens to that process's future
+>> file system operations?  If that’s not allowed, how do you
+>> prevent it?
+We currently do not implement this. However, if we were to implement this, we
+would prevent it from happening by checking every other process's cwd against
+the directory requested to be removed. This can be done on the all list of all
+threads. If the directory is found, we would return an error. If the directory
+is not found, we would then remove the directory. We would also check the
+open_cnt variable of the directory's inode to ensure that it is not open by
+another processes. This would prevent the directory from being removed if it is
+open by a process or if it is in use as a process's current working
+directory. 
+
+
+
+---- RATIONALE ----
+
+
+>> B5: What type of variable/structure did you use to represent the 
+>> current directory of a process?   Why did you choose this 
+>> representation?  Give at least two reasons.
+
+We used a struct dir *cur_dir in the thread struct to store the current
+directory of the thread. We chose this representation because it is easy to
+access the current directory of the thread and it is easy to change the current
+directory of the thread. For instance, a null pointer can be used to represent
+the root directory. Any other pointer value represents a different directory.
+Additionally, a dir pointer stores other information about the directory such
+as the inode and the position of the directory. Because dir_reopen is used to
+reopen the directory, the inode is not freed when the directory is closed. This
+is useful because the inode is needed to access the directory.
+
+thread.h: 86
+
+SURVEY QUESTIONS
+================
+
+
+Answering these questions is optional, but it will help us improve the
+course in future quarters.  Feel free to tell us anything you
+want--these questions are just to spur your thoughts.  You may also
+choose to respond anonymously in the course evaluations at the end of
+the quarter.
+
+
+>> In your opinion, was this assignment, or any one of the three problems
+>> in it, too easy or too hard?  Did it take too long or too little time?
+
+
+>> Did you find that working on a particular part of the assignment gave
+>> you greater insight into some aspect of OS design?
+
+
+>> Is there some particular fact or hint we should give students in
+>> future quarters to help them solve the problems?  Conversely, did you
+>> find any of our guidance to be misleading?
+
+
+>> Do you have any suggestions for the TAs to more effectively assist
+>> students in future quarters?
+
+
+>> Any other comments?
